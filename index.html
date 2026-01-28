@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UrbanPulse Pro - Geospatial Livability Engine</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 850: '#1e293b', 950: '#020617' }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- Custom Styles -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        
+        .icon { width: 1.25rem; height: 1.25rem; display: inline-block; vertical-align: middle; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        /* Pulsing Animation */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.33); opacity: 1; }
+            80%, 100% { opacity: 0; }
+        }
+        @keyframes pulse-dot {
+            0% { transform: scale(0.8); }
+            50% { transform: scale(1); }
+            100% { transform: scale(0.8); }
+        }
+        .ring-container { position: relative; }
+        .ring-ring {
+            border: 3px solid #22c55e;
+            -webkit-border-radius: 30px;
+            height: 24px; width: 24px;
+            position: absolute; left: -4px; top: -4px;
+            animation: pulse-ring 1.25s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        .ring-circle {
+            height: 16px; width: 16px; z-index: 2;
+            background-color: #22c55e;
+            border: 2px solid white; border-radius: 50%;
+            box-shadow: 0 0 8px rgba(0,0,0,0.3);
+            animation: pulse-dot 1.25s cubic-bezier(0.455, 0.03, 0.515, 0.955) -.4s infinite;
+        }
+        
+        /* Markdown Styles */
+        .prose p { margin-bottom: 0.75em; line-height: 1.6; }
+        .prose strong { color: inherit; font-weight: 700; }
+        .prose ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 0.75em; }
+        .prose li { margin-bottom: 0.25em; }
+        .prose h3 { font-weight: 800; margin-top: 1em; margin-bottom: 0.5em; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 overflow-hidden font-sans transition-colors duration-300">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+        
+        // --- GEMINI CONFIG ---
+        // NOTE: The API Key is provided by the environment.
+        const apiKey = ""; 
+
+        // --- 1. CONFIG & DATA ---
+        const CITY_DATA = {
+            bangalore: {
+                name: "Bangalore",
+                initialCenter: [12.96, 77.65],
+                infrastructure: {
+                    airport: { lat: 13.198, lng: 77.706, name: "KIAL Airport" },
+                    metro_hub: { lat: 12.975, lng: 77.606, name: "MG Road Metro" }
+                },
+                hubs: [
+                    { id: "tech-park-whitefield", name: "ITPL (Whitefield)", lat: 12.984, lng: 77.729 },
+                    { id: "tech-park-ecospace", name: "Rmz Ecospace (Bellandur)", lat: 12.926, lng: 77.676 },
+                    { id: "tech-park-manyata", name: "Manyata Tech Park (Hebbal)", lat: 13.044, lng: 77.620 },
+                    { id: "startup-hub", name: "Startup Hub (Koramangala)", lat: 12.935, lng: 77.624 },
+                    { id: "cbd", name: "Central Business Dist (MG Road)", lat: 12.971, lng: 77.594 }
+                ],
+                neighborhoods: [
+                    { 
+                        id: "koramangala", name: "Koramangala", lat: 12.935, lng: 77.624, scores: { rent: 30, safety: 70, fun: 95, investment: 85 }, details: { rent_price: "₹45k - ₹70k", vibe: "Nightlife Central" },
+                        restaurants: [
+                            { name: "Truffles", cuisine: "American", rating: 4.6, cost: "₹₹" },
+                            { name: "Meghana Foods", cuisine: "Biryani", rating: 4.4, cost: "₹₹" },
+                            { name: "The Black Pearl", cuisine: "Buffet", rating: 4.2, cost: "₹₹₹" }
+                        ]
+                    },
+                    { 
+                        id: "indiranagar", name: "Indiranagar", lat: 12.971, lng: 77.641, scores: { rent: 20, safety: 85, fun: 98, investment: 90 }, details: { rent_price: "₹50k - ₹85k", vibe: "Premium & Posh" },
+                        restaurants: [
+                            { name: "Rameshwaram Cafe", cuisine: "South Indian", rating: 4.8, cost: "₹" },
+                            { name: "Toit", cuisine: "Microbrewery", rating: 4.7, cost: "₹₹₹" },
+                            { name: "Glen's Bakehouse", cuisine: "Bakery", rating: 4.5, cost: "₹₹" }
+                        ]
+                    },
+                    { 
+                        id: "hsr-layout", name: "HSR Layout", lat: 12.912, lng: 77.644, scores: { rent: 45, safety: 80, fun: 85, investment: 95 }, details: { rent_price: "₹35k - ₹55k", vibe: "Startup Founder Hub" },
+                        restaurants: [
+                            { name: "Third Wave Coffee", cuisine: "Cafe", rating: 4.5, cost: "₹₹" },
+                            { name: "Empire", cuisine: "Mughlai", rating: 4.1, cost: "₹₹" },
+                            { name: "House of Commons", cuisine: "Pub", rating: 4.3, cost: "₹₹₹" }
+                        ]
+                    },
+                    { 
+                        id: "whitefield", name: "Whitefield", lat: 12.969, lng: 77.750, scores: { rent: 60, safety: 75, fun: 70, investment: 88 }, details: { rent_price: "₹30k - ₹50k", vibe: "Techies & Townships" },
+                        restaurants: [
+                            { name: "Windmills Craftworks", cuisine: "Brewery", rating: 4.8, cost: "₹₹₹₹" },
+                            { name: "Kapoor's Cafe", cuisine: "Punjabi", rating: 4.3, cost: "₹₹" },
+                            { name: "Biergarten", cuisine: "Continental", rating: 4.6, cost: "₹₹₹" }
+                        ]
+                    },
+                    { 
+                        id: "jayanagar", name: "Jayanagar", lat: 12.930, lng: 77.580, scores: { rent: 50, safety: 95, fun: 65, investment: 80 }, details: { rent_price: "₹30k - ₹45k", vibe: "Green & Peaceful" },
+                        restaurants: [
+                            { name: "Taaza Thindi", cuisine: "Breakfast", rating: 4.9, cost: "₹" },
+                            { name: "Nagarjuna", cuisine: "Andhra", rating: 4.5, cost: "₹₹" },
+                            { name: "Go Native", cuisine: "Organic", rating: 4.4, cost: "₹₹₹" }
+                        ]
+                    },
+                    { 
+                        id: "electronic-city", name: "Electronic City", lat: 12.845, lng: 77.660, scores: { rent: 90, safety: 65, fun: 40, investment: 82 }, details: { rent_price: "₹15k - ₹25k", vibe: "Budget Friendly" },
+                        restaurants: [
+                            { name: "Republic of Noodles", cuisine: "Pan Asian", rating: 4.3, cost: "₹₹₹" },
+                            { name: "Village", cuisine: "Theme Buffet", rating: 3.9, cost: "₹₹" },
+                            { name: "Fire Station", cuisine: "Bar", rating: 4.0, cost: "₹₹" }
+                        ]
+                    },
+                ]
+            },
+            mumbai: {
+                name: "Mumbai",
+                initialCenter: [19.0760, 72.8777],
+                infrastructure: {
+                    airport: { lat: 19.089, lng: 72.865, name: "CSM International Airport" },
+                    metro_hub: { lat: 19.119, lng: 72.907, name: "Ghatkopar Metro" }
+                },
+                hubs: [
+                    { id: "bkc", name: "Bandra Kurla Complex", lat: 19.065, lng: 72.868 },
+                    { id: "lower-parel", name: "Lower Parel", lat: 18.995, lng: 72.829 },
+                    { id: "seepz", name: "SEEPZ (Andheri)", lat: 19.123, lng: 72.875 }
+                ],
+                neighborhoods: [
+                    { 
+                        id: "bandra-west", name: "Bandra West", lat: 19.059, lng: 72.829, scores: { rent: 15, safety: 80, fun: 98, investment: 95 }, details: { rent_price: "₹80k - ₹1.5L", vibe: "Bollywood Glam" },
+                        restaurants: [
+                            { name: "Candies", cuisine: "Cafe", rating: 4.6, cost: "₹₹" },
+                            { name: "Elco Pani Puri", cuisine: "Street Food", rating: 4.5, cost: "₹" },
+                            { name: "Bastian", cuisine: "Seafood", rating: 4.4, cost: "₹₹₹₹" }
+                        ]
+                    },
+                    { id: "powai", name: "Powai", lat: 19.117, lng: 72.906, scores: { rent: 45, safety: 90, fun: 75, investment: 85 }, details: { rent_price: "₹50k - ₹80k", vibe: "Modern Township" }, restaurants: [{ name: "Mirchi & Mime", cuisine: "Indian", rating: 4.7, cost: "₹₹₹" }, { name: "Hoppipola", cuisine: "Bar", rating: 4.2, cost: "₹₹" }] },
+                    { id: "andheri-west", name: "Andheri West", lat: 19.136, lng: 72.827, scores: { rent: 40, safety: 70, fun: 95, investment: 88 }, details: { rent_price: "₹45k - ₹75k", vibe: "Media Hub" }, restaurants: [{ name: "Joey's Pizza", cuisine: "Pizza", rating: 4.5, cost: "₹₹" }, { name: "Prithvi Cafe", cuisine: "Cafe", rating: 4.8, cost: "₹₹" }] },
+                    { id: "navi-mumbai", name: "Navi Mumbai (Vashi)", lat: 19.074, lng: 73.003, scores: { rent: 85, safety: 85, fun: 50, investment: 80 }, details: { rent_price: "₹25k - ₹45k", vibe: "Planned & Calm" }, restaurants: [{ name: "Barbeque Nation", cuisine: "Buffet", rating: 4.4, cost: "₹₹₹" }, { name: "Chenab", cuisine: "North Indian", rating: 4.2, cost: "₹₹" }] },
+                    { id: "juhu", name: "Juhu", lat: 19.107, lng: 72.826, scores: { rent: 10, safety: 85, fun: 90, investment: 92 }, details: { rent_price: "₹1L+", vibe: "Luxury Beachside" }, restaurants: [{ name: "Mahesh Lunch Home", cuisine: "Mangalorean", rating: 4.3, cost: "₹₹₹" }, { name: "Soho House", cuisine: "Global", rating: 4.6, cost: "₹₹₹₹" }] }
+                ]
+            },
+            delhi: {
+                name: "Delhi NCR",
+                initialCenter: [28.520, 77.200],
+                infrastructure: {
+                    airport: { lat: 28.556, lng: 77.100, name: "IGI Airport" },
+                    metro_hub: { lat: 28.632, lng: 77.219, name: "Rajiv Chowk" }
+                },
+                hubs: [
+                    { id: "cyber-city", name: "Cyber City (Gurgaon)", lat: 28.495, lng: 77.089 },
+                    { id: "cp", name: "Connaught Place", lat: 28.632, lng: 77.219 },
+                    { id: "noida-sec-18", name: "Noida Sector 18", lat: 28.570, lng: 77.325 }
+                ],
+                neighborhoods: [
+                    { id: "hauz-khas", name: "Hauz Khas", lat: 28.549, lng: 77.203, scores: { rent: 35, safety: 75, fun: 95, investment: 88 }, details: { rent_price: "₹55k - ₹90k", vibe: "Hipster History" }, restaurants: [{ name: "Social", cuisine: "Bar/Cafe", rating: 4.5, cost: "₹₹₹" }, { name: "Yeti", cuisine: "Himalayan", rating: 4.6, cost: "₹₹₹" }] },
+                    { id: "vasant-vihar", name: "Vasant Vihar", lat: 28.560, lng: 77.161, scores: { rent: 15, safety: 90, fun: 60, investment: 95 }, details: { rent_price: "₹1L+", vibe: "Diplomatic Enclave" }, restaurants: [{ name: "PCO", cuisine: "Speakeasy", rating: 4.7, cost: "₹₹₹₹" }, { name: "Leo's Pizzeria", cuisine: "Pizza", rating: 4.6, cost: "₹₹" }] },
+                    { id: "dwarka", name: "Dwarka", lat: 28.592, lng: 77.046, scores: { rent: 70, safety: 80, fun: 45, investment: 75 }, details: { rent_price: "₹25k - ₹45k", vibe: "Residential Grid" }, restaurants: [{ name: "Pavilion 75", cuisine: "Buffet", rating: 4.1, cost: "₹₹₹" }, { name: "Fingerlickerz", cuisine: "North Indian", rating: 3.9, cost: "₹₹" }] },
+                    { id: "golf-course-road", name: "Golf Course Rd (Gurgaon)", lat: 28.459, lng: 77.094, scores: { rent: 20, safety: 85, fun: 85, investment: 92 }, details: { rent_price: "₹80k+", vibe: "Corporate Luxury" }, restaurants: [{ name: "Comorin", cuisine: "Modern Indian", rating: 4.8, cost: "₹₹₹₹" }, { name: "Whisky Samba", cuisine: "Bar", rating: 4.5, cost: "₹₹₹" }] },
+                    { id: "indirapuram", name: "Indirapuram", lat: 28.640, lng: 77.371, scores: { rent: 90, safety: 60, fun: 40, investment: 70 }, details: { rent_price: "₹18k - ₹30k", vibe: "Budget Family" }, restaurants: [{ name: "The Reader's Cafe", cuisine: "Cafe", rating: 4.2, cost: "₹₹" }, { name: "Maini's Green Leaf", cuisine: "Veg", rating: 4.0, cost: "₹₹" }] }
+                ]
+            }
+        };
+
+        const PERSONAS = [
+            { id: 'custom', name: 'Custom', icon: '⚡', weights: null }, 
+            { id: 'founder', name: 'The Founder', icon: '🚀', weights: { rent: 20, safety: 40, fun: 60, commute: 90 } },
+            { id: 'family', name: 'Family Mode', icon: '🏡', weights: { rent: 40, safety: 95, fun: 20, commute: 30 } },
+            { id: 'student', name: 'Student', icon: '🎓', weights: { rent: 90, safety: 30, fun: 80, commute: 20 } },
+            { id: 'investor', name: 'Investor', icon: '📈', weights: { rent: 30, safety: 50, fun: 40, commute: 40 } }
+        ];
+
+        // --- 2. ICONS (Inline SVG for HTML compatibility) ---
+        const Icons = {
+            Trending: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>,
+            Briefcase: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>,
+            Magic: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon mr-1"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 3v4"/><path d="M3 5h4"/><path d="M3 9h4"/></svg>,
+            Check: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><polyline points="20 6 9 17 4 12"/></svg>,
+            Globe: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>,
+            Car: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12a6 6 0 0 0 6 6h2a6 6 0 0 0 6-6zM14 16h-2v2h2v-2zM9 16H7v2h2v-2z"/></svg>,
+            Clock: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+            Calculator: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg>,
+            X: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>,
+            Sun: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>,
+            Moon: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>,
+            Plane: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><path d="M2 22h20"/><path d="M12 2 2 7l10 5 10-5-10-5Zm0 9 4 7-4 1-4-1 4-7Z"/><path d="M2 17h20"/><path d="m22 2-7 20-5-9-9-5Z"/></svg>,
+            Train: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><rect width="16" height="16" x="4" y="3" rx="2"/><path d="M4 11h16"/><path d="M12 3v8"/><path d="m8 19-2 3"/><path d="m18 22-2-3"/><path d="M8 15h0"/><path d="M16 15h0"/></svg>,
+            Chat: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2v5Z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>,
+            Utensils: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>,
+            Loader: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
+            Calendar: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>,
+            Download: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>,
+            Settings: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>,
+            User: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        };
+
+        // --- 3. HELPER FUNCTIONS ---
+        const calculateDistance = (lat1, lon1, lat2, lon2) => {
+            const R = 6371; 
+            const dLat = (lat2 - lat1) * (Math.PI / 180);
+            const dLon = (lon2 - lon1) * (Math.PI / 180);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        };
+
+        const getColor = (score) => {
+            if (!score) return "#94a3b8";
+            if (score > 80) return "#22c55e"; 
+            if (score > 60) return "#eab308"; 
+            return "#ef4444"; 
+        };
+
+        const calculateROI = (rentScore, investmentScore) => {
+            const basePrice = 6000000; 
+            const propertyPrice = basePrice + ((100 - rentScore) * 150000); 
+            const monthlyRent = (100 - rentScore) * 800 + 15000;
+            const appreciationRate = 0.05 + ((investmentScore / 100) * 0.05);
+            const futureValue = propertyPrice * Math.pow((1 + appreciationRate), 5);
+            const totalRentPaid = monthlyRent * 12 * 5 * 1.15; 
+            return { propertyPrice, futureValue, totalRentPaid, netGain: futureValue - propertyPrice };
+        };
+
+        // --- 4. COMPONENTS ---
+
+        const SettingsModal = ({ onClose, onSave, apiKey, isDark }) => {
+            const [key, setKey] = useState(apiKey || '');
+            
+            return (
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className={`rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-6 ${isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold flex items-center gap-2"><Icons.Settings /> Settings</h3>
+                            <button onClick={onClose}><Icons.X /></button>
+                        </div>
+                        <p className="text-xs mb-4 opacity-70">Enter your Gemini API Key to enable AI features (Insight, Chat, Day Plan).</p>
+                        <input 
+                            type="password" 
+                            placeholder="Paste API Key Here" 
+                            value={key}
+                            onChange={(e) => setKey(e.target.value)}
+                            className={`w-full p-2 rounded border outline-none text-sm mb-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-300'}`}
+                        />
+                        <button onClick={() => onSave(key)} className="w-full bg-blue-600 text-white py-2 rounded-lg font-bold text-sm hover:bg-blue-700">
+                            Save Key
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const AboutModal = ({ onClose, isDark }) => {
+            return (
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className={`rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-6 ${isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="font-bold flex items-center gap-2"><Icons.User /> About Developer</h3>
+                            <button onClick={onClose}><Icons.X /></button>
+                        </div>
+                        <div className="text-center">
+                            <div className="w-20 h-20 bg-blue-100 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl">👨‍💻</div>
+                            <h2 className="text-xl font-bold mb-1">UrbanPulse Pro</h2>
+                            <p className="text-xs opacity-60 uppercase tracking-widest mb-4">Portfolio Project</p>
+                            <p className="text-sm opacity-80 mb-6">
+                                A geospatial decision support system for urban relocation, powered by Gemini AI and real-time algorithmic scoring.
+                            </p>
+                            <div className="flex justify-center gap-2">
+                                <a href="#" className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-700">GitHub</a>
+                                <a href="#" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700">LinkedIn</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const DayPlanModal = ({ city, persona, onClose, isDark, apiKey }) => {
+            const [plan, setPlan] = useState("");
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                const generatePlan = async () => {
+                    if (!apiKey) {
+                        setPlan("**Gemini API Key Missing**\n\nPlease enter your API key in the Settings (⚙️) menu to use this feature.");
+                        setLoading(false);
+                        return;
+                    }
+                    try {
+                        const personaName = persona === 'custom' ? 'Local Resident' : (PERSONAS.find(p => p.id === persona)?.name || 'Local Resident');
+                        const prompt = `Generate a 'Day in the Life' itinerary for a ${personaName} living in ${city.name} neighborhood, ${city.city || 'Bangalore'}. The area is known for ${city.details.vibe}. Include 3 distinct time slots: Morning, Afternoon, Evening. Mention specific types of places (cafes, parks, etc.) that fit the persona. Keep it concise, engaging, and formatted in Markdown.`;
+                        
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                        });
+                        const data = await res.json();
+                        setPlan(data.candidates?.[0]?.content?.parts?.[0]?.text || "Failed to generate plan.");
+                    } catch (e) {
+                        setPlan("Error connecting to Gemini API. Please check your key.");
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+                generatePlan();
+            }, [city, persona, apiKey]);
+
+            return (
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className={`rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh] ${isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 p-6 text-white flex justify-between items-start shrink-0">
+                            <div>
+                                <div className="flex items-center gap-2 mb-1 opacity-80">
+                                    <Icons.Calendar /> <span className="text-xs font-bold uppercase tracking-wider">Day in the Life</span>
+                                </div>
+                                <h2 className="text-2xl font-bold">{city.name}</h2>
+                                <p className="text-slate-200 text-sm">Curated itinerary for you</p>
+                            </div>
+                            <button onClick={onClose} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition"><Icons.X /></button>
+                        </div>
+                        
+                        <div className="p-6 overflow-y-auto grow">
+                            {loading ? (
+                                <div className="flex flex-col items-center justify-center h-40 gap-4 opacity-60">
+                                    <Icons.Loader />
+                                    <p className="text-sm">Crafting your perfect day...</p>
+                                </div>
+                            ) : (
+                                <div className="prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: marked.parse(plan) }}></div>
+                            )}
+                        </div>
+                        
+                        <div className={`p-4 border-t shrink-0 ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}>
+                            <button onClick={onClose} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 transition shadow-lg">
+                                Close Itinerary
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ComparisonInsight = ({ cityA, cityB, apiKey, isDark }) => {
+            const [insight, setInsight] = useState("");
+            const [loading, setLoading] = useState(false);
+
+            const generateComparison = async () => {
+                if (!apiKey) {
+                    setInsight("Please set API Key in Settings (⚙️) to use AI features.");
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const prompt = `Compare ${cityA.name} and ${cityB.name} for a resident. 
+                    Stats A: Rent Score ${cityA.scores.rent} (lower is expensive), Safety ${cityA.scores.safety}, Fun ${cityA.scores.fun}, Commute Score ${cityA.commuteScore}.
+                    Stats B: Rent Score ${cityB.scores.rent}, Safety ${cityB.scores.safety}, Fun ${cityB.scores.fun}, Commute Score ${cityB.commuteScore}.
+                    Highlight the winner based on these stats in 1-2 sentences. Be specific about why.`;
+                    
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    const data = await res.json();
+                    setInsight(data.candidates?.[0]?.content?.parts?.[0]?.text || "Could not generate comparison.");
+                } catch (e) {
+                    setInsight("Error connecting to Gemini API.");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            if (!cityB) return null;
+
+            return (
+                <div className={`mt-2 p-3 rounded-lg border text-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-blue-50 border-blue-100'}`}>
+                    <div className="flex justify-between items-center mb-2">
+                        <span className={`font-bold flex items-center gap-1 ${isDark ? 'text-blue-400' : 'text-blue-800'}`}>
+                            <Icons.Magic /> Smart Comparison
+                        </span>
+                        {!insight && !loading && (
+                            <button onClick={generateComparison} className="text-[10px] bg-white text-slate-800 px-2 py-1 rounded border shadow-sm hover:bg-slate-50">
+                                ✨ Analyze
+                            </button>
+                        )}
+                    </div>
+                    {loading ? (
+                        <div className="flex items-center gap-2 opacity-60"><Icons.Loader /> Analyzing trade-offs...</div>
+                    ) : insight ? (
+                        <div className="leading-relaxed opacity-90" dangerouslySetInnerHTML={{ __html: marked.parse(insight) }}></div>
+                    ) : (
+                        <p className="opacity-60 text-xs">Tap analyze to get an AI breakdown of these two areas.</p>
+                    )}
+                </div>
+            );
+        };
+
+        const InvestmentModal = ({ city, onClose, isDark, apiKey }) => {
+            const { propertyPrice, futureValue, totalRentPaid, netGain } = calculateROI(city.scores.rent, city.scores.investment);
+            const roiPercent = ((netGain / propertyPrice) * 100).toFixed(1);
+            
+            const [negotiationScript, setNegotiationScript] = useState("");
+            const [loadingScript, setLoadingScript] = useState(false);
+
+            const generateNegotiationScript = async () => {
+                if (!apiKey) {
+                    setNegotiationScript("Please set API Key in Settings (⚙️) to use this feature.");
+                    return;
+                }
+                setLoadingScript(true);
+                try {
+                    const prompt = `Write a polite but firm email to a landlord in ${city.name} negotiating rent. 
+                    Context: The market rent is around ${city.details.rent_price}. 
+                    I am a responsible tenant looking for a long-term stay. 
+                    Ask for a 5-10% discount citing my good credit score and immediate move-in readiness. Keep it professional.`;
+                    
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    const data = await res.json();
+                    setNegotiationScript(data.candidates?.[0]?.content?.parts?.[0]?.text || "Could not generate script.");
+                } catch (e) {
+                    setNegotiationScript("Error connecting to Gemini API.");
+                } finally {
+                    setLoadingScript(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className={`rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto transform transition-all scale-100 ${isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                        <div className="bg-gradient-to-r from-blue-900 to-slate-900 p-6 text-white flex justify-between items-start sticky top-0 z-10">
+                            <div>
+                                <div className="flex items-center gap-2 mb-1 opacity-80">
+                                    <Icons.Trending /> <span className="text-xs font-bold uppercase tracking-wider">Financial Outlook</span>
+                                </div>
+                                <h2 className="text-2xl font-bold">{city.name}</h2>
+                                <p className="text-slate-300 text-sm">5-Year Buy vs. Rent Projection</p>
+                            </div>
+                            <button onClick={onClose} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition"><Icons.X /></button>
+                        </div>
+                        
+                        <div className="p-6 space-y-6">
+                            {/* ROI Grid */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className={`p-4 rounded-xl border ${isDark ? 'bg-blue-900/30 border-blue-800' : 'bg-blue-50 border-blue-100'}`}>
+                                    <div className="text-xs text-blue-500 font-bold uppercase mb-1">Est. Entry Price</div>
+                                    <div className="text-xl font-black">₹{(propertyPrice/100000).toFixed(1)} L</div>
+                                </div>
+                                <div className={`p-4 rounded-xl border ${isDark ? 'bg-emerald-900/30 border-emerald-800' : 'bg-emerald-50 border-emerald-100'}`}>
+                                    <div className="text-xs text-emerald-500 font-bold uppercase mb-1">Proj. Appreciation</div>
+                                    <div className="text-xl font-black text-emerald-500">+₹{(netGain/100000).toFixed(1)} L</div>
+                                </div>
+                            </div>
+
+                            <div className="bg-slate-100 dark:bg-slate-700 p-4 rounded-xl">
+                                <h3 className="text-sm font-bold mb-2 flex items-center gap-2"><Icons.Calculator /> The Verdict</h3>
+                                <p className="text-xs opacity-70 leading-relaxed">
+                                    {city.scores.investment > 80 
+                                        ? "High Growth Zone. Buying recommended for >3yr horizon." 
+                                        : "Prices saturated. Renting is financially smarter here."}
+                                </p>
+                            </div>
+
+                            <div className={`border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                                <h3 className="text-sm font-bold mb-2 flex items-center gap-2">
+                                    <Icons.Chat /> Rent Negotiator
+                                    {loadingScript && <Icons.Loader />}
+                                </h3>
+                                {!negotiationScript ? (
+                                    <button 
+                                        onClick={generateNegotiationScript}
+                                        className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-3 py-2 rounded-lg w-full font-bold transition flex items-center justify-center gap-2"
+                                    >
+                                        ✨ Draft Negotiation Email
+                                    </button>
+                                ) : (
+                                    <div className={`text-xs p-3 rounded-lg max-h-40 overflow-y-auto ${isDark ? 'bg-slate-900 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                                        <div dangerouslySetInnerHTML={{ __html: marked.parse(negotiationScript) }}></div>
+                                        <button 
+                                            onClick={() => {navigator.clipboard.writeText(negotiationScript); alert("Copied to clipboard!");}}
+                                            className="mt-2 text-[10px] text-blue-500 hover:underline font-bold w-full text-right"
+                                        >
+                                            Copy Text
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            <button onClick={onClose} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition shadow-lg">
+                                Close Projection
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const DiningModal = ({ city, onClose, isDark }) => {
+            return (
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className={`rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100 ${isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                        <div className="bg-gradient-to-r from-orange-500 to-red-600 p-6 text-white flex justify-between items-start">
+                            <div>
+                                <div className="flex items-center gap-2 mb-1 opacity-80">
+                                    <Icons.Utensils /> <span className="text-xs font-bold uppercase tracking-wider">Top Eats</span>
+                                </div>
+                                <h2 className="text-2xl font-bold">{city.name} Dining</h2>
+                                <p className="text-slate-100 text-sm opacity-90">Curated picks for foodies</p>
+                            </div>
+                            <button onClick={onClose} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition"><Icons.X /></button>
+                        </div>
+                        
+                        <div className="p-6 space-y-4">
+                            {city.restaurants && city.restaurants.length > 0 ? (
+                                city.restaurants.map((rest, idx) => (
+                                    <div key={idx} className={`p-4 rounded-xl border flex justify-between items-center ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-white border-slate-100 shadow-sm'}`}>
+                                        <div>
+                                            <h3 className="font-bold text-lg">{rest.name}</h3>
+                                            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{rest.cuisine} • {rest.cost}</p>
+                                        </div>
+                                        <div className="flex flex-col items-end">
+                                            <span className="bg-green-100 text-green-700 px-2 py-1 rounded-lg text-xs font-bold mb-1">★ {rest.rating}</span>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="text-center opacity-50 text-sm">No dining data available for this area yet.</p>
+                            )}
+                            
+                            <div className={`mt-4 p-3 rounded-lg text-xs text-center ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
+                                Data aggregated from Zomato & Google Reviews
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ChatModal = ({ city, onClose, isDark, apiKey }) => {
+            const [query, setQuery] = useState("");
+            const [response, setResponse] = useState("");
+            const [loading, setLoading] = useState(false);
+
+            const handleAsk = async () => {
+                if (!query) return;
+                setLoading(true);
+                setResponse("");
+                
+                if (!apiKey) {
+                    setResponse("Please enter your API key in the Settings (⚙️) menu to use this feature.");
+                    setLoading(false);
+                    return;
+                }
+
+                try {
+                    const prompt = `User asks about ${city.name} neighborhood: "${query}". Answer briefly as a local expert. The neighborhood is known for ${city.details.vibe}.`;
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    const data = await res.json();
+                    setResponse(data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't get an answer right now.");
+                } catch (e) {
+                    setResponse("Error connecting to Gemini.");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className={`rounded-2xl shadow-2xl w-full max-w-md overflow-hidden ${isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                        <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                            <h3 className="font-bold flex items-center gap-2"><Icons.Chat /> Ask about {city.name}</h3>
+                            <button onClick={onClose}><Icons.X /></button>
+                        </div>
+                        <div className="p-4 h-64 overflow-y-auto bg-slate-50 dark:bg-slate-900/50">
+                            {response ? (
+                                <div className="prose prose-sm dark:prose-invert" dangerouslySetInnerHTML={{ __html: marked.parse(response) }}></div>
+                            ) : (
+                                <p className="text-sm opacity-50 text-center mt-10">Ask me anything about the local vibe, food, or safety!</p>
+                            )}
+                            {loading && <div className="flex justify-center mt-4"><Icons.Loader /></div>}
+                        </div>
+                        <div className="p-3 border-t border-slate-200 dark:border-slate-700 flex gap-2">
+                            <input 
+                                type="text" 
+                                placeholder="E.g., Are there good parks?" 
+                                className={`flex-1 p-2 rounded-lg text-sm border outline-none ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-300'}`}
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleAsk()}
+                            />
+                            <button onClick={handleAsk} disabled={loading} className="bg-blue-600 text-white px-4 rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-50">
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AIInsight = ({ city, weights, trafficImpact, apiKey }) => {
+            const [insight, setInsight] = useState(null);
+            const [loading, setLoading] = useState(false);
+
+            const generateInsight = async () => {
+                if (!apiKey) {
+                    setInsight("Please set API Key in Settings (⚙️) to use AI features.");
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const prompt = `Analyze ${city.name} for a user who prioritizes: Rent(${weights.rent}%), Safety(${weights.safety}%), Fun(${weights.fun}%), Commute(${weights.commute}%). The neighborhood stats are: Rent Score ${city.scores.rent} (lower is exp), Safety ${city.scores.safety}, Fun ${city.scores.fun}, Commute Score ${city.commuteScore}. Explain the fit in 2 concise, engaging sentences. Mention specific trade-offs.`;
+                    
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    const data = await res.json();
+                    setInsight(data.candidates?.[0]?.content?.parts?.[0]?.text);
+                } catch (e) {
+                    setInsight("Could not generate insight. Check API Key.");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // Reset insight when city changes
+            useEffect(() => { setInsight(null); }, [city]);
+
+            return (
+                <div className={`p-4 rounded-xl border shadow-sm mb-4 transition-colors ${trafficImpact ? 'bg-amber-50 border-amber-100' : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-100'}`}>
+                    <div className={`flex justify-between items-center mb-2`}>
+                        <div className={`flex items-center gap-2 font-bold text-xs uppercase tracking-wider ${trafficImpact ? 'text-amber-800' : 'text-indigo-800'}`}>
+                            {trafficImpact ? <span className="flex gap-1 items-center"><Icons.Car /> Traffic Alert</span> : <span className="flex gap-1 items-center"><Icons.Magic /> AI Insight</span>}
+                        </div>
+                        {!insight && !loading && (
+                            <button onClick={generateInsight} className="text-[10px] bg-white px-2 py-1 rounded border shadow-sm hover:bg-slate-50 flex items-center gap-1 text-slate-800">
+                                ✨ Generate
+                            </button>
+                        )}
+                    </div>
+                    
+                    <div className="text-sm text-slate-700 leading-relaxed min-h-[40px]">
+                        {loading ? (
+                            <span className="flex items-center gap-2 opacity-50"><Icons.Loader /> Analyzing data...</span>
+                        ) : insight ? (
+                            <div dangerouslySetInnerHTML={{ __html: marked.parse(insight) }}></div>
+                        ) : (
+                            <span className="opacity-60 italic text-xs">Click generate to get a Gemini-powered analysis of this match.</span>
+                        )}
+                    </div>
+                </div>
+            )
+        }
+
+        const RadarChartComponent = ({ cityA, cityB, isDark }) => {
+            const canvasRef = useRef(null);
+            const chartInstance = useRef(null);
+
+            useEffect(() => {
+                if (!canvasRef.current) return;
+                const ctx = canvasRef.current.getContext('2d');
+                if (chartInstance.current) chartInstance.current.destroy();
+
+                const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
+                const textColor = isDark ? '#94a3b8' : '#64748b';
+
+                chartInstance.current = new Chart(ctx, {
+                    type: 'radar',
+                    data: {
+                        labels: ['Cost', 'Safety', 'Fun', 'Commute', 'ROI'],
+                        datasets: [
+                            {
+                                label: cityA.name,
+                                data: [cityA.scores.rent, cityA.scores.safety, cityA.scores.fun, cityA.commuteScore || 0, cityA.scores.investment],
+                                backgroundColor: 'rgba(37, 99, 235, 0.2)',
+                                borderColor: 'rgba(37, 99, 235, 1)',
+                                borderWidth: 2,
+                            },
+                            cityB ? {
+                                label: cityB.name,
+                                data: [cityB.scores.rent, cityB.scores.safety, cityB.scores.fun, cityB.commuteScore || 0, cityB.scores.investment],
+                                backgroundColor: 'rgba(168, 85, 247, 0.2)',
+                                borderColor: 'rgba(168, 85, 247, 1)',
+                                borderWidth: 2,
+                            } : null
+                        ].filter(Boolean)
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            r: {
+                                min: 0, max: 100,
+                                ticks: { display: false },
+                                grid: { color: gridColor },
+                                angleLines: { color: gridColor },
+                                pointLabels: { color: textColor, font: { size: 10 } }
+                            }
+                        },
+                        plugins: {
+                            legend: { position: 'bottom', labels: { color: textColor, boxWidth: 8, font: { size: 10 } } }
+                        }
+                    }
+                });
+
+                return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+            }, [cityA, cityB, isDark]);
+
+            return (
+                <div className={`p-2 rounded-lg border shadow-sm h-64 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <canvas ref={canvasRef}></canvas>
+                </div>
+            );
+        };
+
+        const Slider = ({ label, value, onChange, disabled, isDark }) => (
+            <div className={`transition-opacity ${disabled ? 'opacity-50' : 'opacity-100'}`}>
+                <div className="flex justify-between mb-1">
+                    <label className={`font-medium text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{label}</label>
+                    <span className="text-xs font-bold text-blue-500">{value}%</span>
+                </div>
+                <input 
+                    type="range" min="0" max="100" value={value} 
+                    disabled={disabled}
+                    onChange={(e) => onChange(Number(e.target.value))}
+                    className="w-full h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:cursor-not-allowed dark:bg-slate-700"
+                />
+            </div>
+        );
+
+        // --- 5. MAIN APP ---
+        const App = () => {
+            const [currentCityId, setCurrentCityId] = useState('bangalore');
+            const [weights, setWeights] = useState({ rent: 40, safety: 30, fun: 20, commute: 50 });
+            const [compareId, setCompareId] = useState(null);
+            const [activePersona, setActivePersona] = useState('custom');
+            const [isPeakHour, setIsPeakHour] = useState(false);
+            const [investmentCity, setInvestmentCity] = useState(null);
+            const [diningCity, setDiningCity] = useState(null);
+            const [chatCity, setChatCity] = useState(null);
+            const [dayPlanCity, setDayPlanCity] = useState(null);
+            const [isDark, setIsDark] = useState(false);
+            const [showSettings, setShowSettings] = useState(false);
+            const [showAbout, setShowAbout] = useState(false);
+            const [userApiKey, setUserApiKey] = useState("");
+            
+            const mapRef = useRef(null);
+            const markersRef = useRef({});
+            const hubMarkerRef = useRef(null);
+            const lineRef = useRef(null);
+            const tileLayerRef = useRef(null);
+
+            // Load API Key from local storage
+            useEffect(() => {
+                const savedKey = localStorage.getItem('urbanpulse_api_key');
+                if (savedKey) setUserApiKey(savedKey);
+            }, []);
+
+            const saveApiKey = (key) => {
+                localStorage.setItem('urbanpulse_api_key', key);
+                setUserApiKey(key);
+                setShowSettings(false);
+            };
+
+            const currentCityData = CITY_DATA[currentCityId];
+            const [selectedHub, setSelectedHub] = useState(currentCityData.hubs[0]);
+
+            useEffect(() => {
+                setSelectedHub(currentCityData.hubs[0]);
+                setCompareId(null);
+                if (mapRef.current) {
+                    mapRef.current.flyTo(currentCityData.initialCenter, 11, { duration: 1.5 });
+                }
+            }, [currentCityId]);
+
+            useEffect(() => {
+                if (isDark) {
+                    document.body.classList.add('dark');
+                    document.body.style.backgroundColor = '#0f172a';
+                } else {
+                    document.body.classList.remove('dark');
+                    document.body.style.backgroundColor = '#f8fafc';
+                }
+                
+                // Update Map Tiles
+                if (tileLayerRef.current) {
+                    const url = isDark 
+                        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png' 
+                        : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+                    tileLayerRef.current.setUrl(url);
+                }
+            }, [isDark]);
+
+            const scoredData = useMemo(() => {
+                return currentCityData.neighborhoods.map((city) => {
+                    const dist = calculateDistance(city.lat, city.lng, selectedHub.lat, selectedHub.lng);
+                    const trafficMultiplier = isPeakHour ? 1.5 : 1.0;
+                    let cScore = 100 - (dist * 5 * trafficMultiplier); 
+                    if (cScore < 0) cScore = 0;
+
+                    const totalWeight = weights.rent + weights.safety + weights.fun + weights.commute;
+                    const wRent = weights.rent / totalWeight;
+                    const wSafety = weights.safety / totalWeight;
+                    const wFun = weights.fun / totalWeight;
+                    const wCommute = weights.commute / totalWeight;
+
+                    let score;
+                    if (activePersona === 'investor') {
+                        score = (city.scores.investment * 0.6) + (city.scores.rent * 0.2) + (city.scores.fun * 0.2);
+                    } else {
+                        score = (
+                            (city.scores.rent * wRent) +
+                            (city.scores.safety * wSafety) +
+                            (city.scores.fun * wFun) +
+                            (cScore * wCommute)
+                        );
+                    }
+
+                    // Connectivity Metrics
+                    const distToAirport = calculateDistance(city.lat, city.lng, currentCityData.infrastructure.airport.lat, currentCityData.infrastructure.airport.lng);
+                    const distToMetro = calculateDistance(city.lat, city.lng, currentCityData.infrastructure.metro_hub.lat, currentCityData.infrastructure.metro_hub.lng);
+
+                    return { 
+                        ...city, 
+                        finalScore: Math.round(score),
+                        commuteScore: Math.round(cScore),
+                        distanceToWork: Number(dist.toFixed(1)),
+                        distToAirport: Number(distToAirport.toFixed(1)),
+                        distToMetro: Number(distToMetro.toFixed(1))
+                    };
+                });
+            }, [weights, selectedHub, activePersona, currentCityData, isPeakHour]);
+
+            const sortedCities = useMemo(() => [...scoredData].sort((a, b) => b.finalScore - a.finalScore), [scoredData]);
+            const comparisonCity = useMemo(() => compareId ? scoredData.find(c => c.id === compareId) : null, [compareId, scoredData]);
+
+            const handlePersonaChange = (personaId) => {
+                setActivePersona(personaId);
+                const persona = PERSONAS.find(p => p.id === personaId);
+                if (persona.weights) setWeights(persona.weights);
+            };
+
+            // Initialize Map
+            useEffect(() => {
+                if (!mapRef.current) {
+                    mapRef.current = L.map('map-container', { zoomControl: false }).setView(CITY_DATA['bangalore'].initialCenter, 11);
+                    tileLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                        attribution: '&copy; OpenStreetMap'
+                    }).addTo(mapRef.current);
+                    L.control.zoom({ position: 'bottomright' }).addTo(mapRef.current);
+                }
+
+                const map = mapRef.current;
+
+                // Markers Logic
+                if (hubMarkerRef.current) map.removeLayer(hubMarkerRef.current);
+                const hubIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="background-color: #2563eb; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3);"></div>`,
+                    iconSize: [14, 14], iconAnchor: [7, 7]
+                });
+                hubMarkerRef.current = L.marker([selectedHub.lat, selectedHub.lng], { icon: hubIcon })
+                    .bindPopup(`<b>🏢 ${selectedHub.name}</b>`)
+                    .addTo(map);
+
+                Object.values(markersRef.current).forEach(marker => map.removeLayer(marker));
+                markersRef.current = {};
+
+                scoredData.forEach((city, idx) => {
+                    const isTopPick = city.id === sortedCities[0].id;
+                    const color = getColor(city.finalScore);
+                    
+                    let marker;
+                    if (isTopPick) {
+                        const markerIcon = L.divIcon({
+                            className: 'ring-container',
+                            html: `<div class="ring-ring"></div><div class="ring-circle"></div>`,
+                            iconSize: [20, 20], iconAnchor: [10, 10]
+                        });
+                        marker = L.marker([city.lat, city.lng], { icon: markerIcon });
+                    } else {
+                        marker = L.circleMarker([city.lat, city.lng], {
+                            radius: city.finalScore ? (city.finalScore / 3.5) : 8,
+                            fillColor: color, color: color, weight: 1, opacity: 1, fillOpacity: 0.6
+                        });
+                    }
+                    
+                    marker.bindPopup(`
+                        <div class="text-center font-sans">
+                            <h3 class="font-bold text-sm">${city.name}</h3>
+                            <div class="text-xs font-bold my-1" style="color: ${color}">Match: ${city.finalScore}%</div>
+                        </div>
+                    `);
+                    marker.addTo(map);
+                    markersRef.current[city.id] = marker;
+                });
+
+                if (lineRef.current) map.removeLayer(lineRef.current);
+                if (sortedCities.length > 0) {
+                    const topCity = sortedCities[0];
+                    lineRef.current = L.polyline(
+                        [[selectedHub.lat, selectedHub.lng], [topCity.lat, topCity.lng]],
+                        { color: '#3b82f6', dashArray: '5, 10', weight: 2, opacity: 0.6 }
+                    ).addTo(map);
+                }
+            }, [scoredData, selectedHub, sortedCities]);
+
+            // PDF Report Simulation
+            const generateReport = () => {
+                alert("Simulating PDF Generation...\n\nYour 'Relocation Report' for " + sortedCities[0].name + " is ready!");
+            };
+
+            return (
+                <div className={`flex h-screen flex-col md:flex-row font-sans transition-colors duration-300 ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
+                    
+                    {investmentCity && <InvestmentModal city={investmentCity} onClose={() => setInvestmentCity(null)} isDark={isDark} apiKey={userApiKey} />}
+                    {chatCity && <ChatModal city={chatCity} onClose={() => setChatCity(null)} isDark={isDark} apiKey={userApiKey} />}
+                    {diningCity && <DiningModal city={diningCity} onClose={() => setDiningCity(null)} isDark={isDark} />}
+                    {dayPlanCity && <DayPlanModal city={dayPlanCity} persona={activePersona} onClose={() => setDayPlanCity(null)} isDark={isDark} apiKey={userApiKey} />}
+                    {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onSave={saveApiKey} apiKey={userApiKey} isDark={isDark} />}
+                    {showAbout && <AboutModal onClose={() => setShowAbout(false)} isDark={isDark} />}
+
+                    {/* SIDEBAR */}
+                    <div className={`w-full md:w-[400px] backdrop-blur-sm shadow-2xl z-20 flex flex-col h-full border-r transition-colors duration-300 ${isDark ? 'bg-slate-900/95 border-slate-800' : 'bg-white/95 border-slate-200'}`}>
+                        
+                        {/* Header */}
+                        <div className={`p-5 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="p-2 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl text-white shadow-lg">
+                                        <Icons.Trending />
+                                    </div>
+                                    <div>
+                                        <h1 className="text-xl font-extrabold tracking-tight">UrbanPulse <span className="text-blue-500">Pro</span></h1>
+                                        <p className="text-[10px] font-semibold opacity-60 uppercase tracking-widest">Relocation Engine</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex gap-2">
+                                    <button onClick={() => setIsDark(!isDark)} className={`p-2 rounded-lg border transition-colors ${isDark ? 'border-slate-700 hover:bg-slate-800 text-yellow-400' : 'border-slate-200 hover:bg-slate-100 text-slate-600'}`}>
+                                        {isDark ? <Icons.Sun /> : <Icons.Moon />}
+                                    </button>
+                                    <button onClick={() => setShowSettings(true)} className={`p-2 rounded-lg border transition-colors ${isDark ? 'border-slate-700 hover:bg-slate-800 text-slate-400' : 'border-slate-200 hover:bg-slate-100 text-slate-600'}`}>
+                                        <Icons.Settings />
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div className={`flex items-center gap-2 p-2 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                                <span className="opacity-50"><Icons.Globe /></span>
+                                <select 
+                                    className="bg-transparent text-sm font-bold outline-none w-full cursor-pointer"
+                                    value={currentCityId}
+                                    onChange={(e) => setCurrentCityId(e.target.value)}
+                                >
+                                    <option value="bangalore" className="text-slate-800">Bangalore</option>
+                                    <option value="mumbai" className="text-slate-800">Mumbai</option>
+                                    <option value="delhi" className="text-slate-800">Delhi NCR</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 overflow-y-auto p-5 space-y-6">
+                            
+                            {/* Commute */}
+                            <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className="flex justify-between items-start mb-3">
+                                    <div className="flex items-center gap-2 font-bold text-sm">
+                                        <Icons.Briefcase /> Work Location
+                                    </div>
+                                    <button 
+                                        onClick={() => setIsPeakHour(!isPeakHour)}
+                                        className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-bold transition-all ${isPeakHour ? 'bg-amber-100 border-amber-200 text-amber-700' : (isDark ? 'border-slate-600 hover:bg-slate-700' : 'bg-white border-slate-200 hover:bg-slate-100')}`}
+                                    >
+                                        {isPeakHour ? <Icons.Car /> : <Icons.Clock />}
+                                        {isPeakHour ? 'Peak Traffic' : 'Off-Peak'}
+                                    </button>
+                                </div>
+                                <select 
+                                    className={`w-full p-2.5 rounded-lg border text-sm focus:ring-2 focus:ring-blue-500 outline-none ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-300'}`}
+                                    value={selectedHub.id}
+                                    onChange={(e) => setSelectedHub(currentCityData.hubs.find(h => h.id === e.target.value) || currentCityData.hubs[0])}
+                                >
+                                    {currentCityData.hubs.map(hub => <option key={hub.id} value={hub.id} className="text-slate-800">{hub.name}</option>)}
+                                </select>
+                            </div>
+
+                            {/* Personas */}
+                            <div>
+                                <label className="text-xs font-bold opacity-60 uppercase tracking-wider mb-3 block">Select Persona</label>
+                                <div className="grid grid-cols-5 gap-2">
+                                    {PERSONAS.map(persona => (
+                                        <button 
+                                            key={persona.id}
+                                            onClick={() => handlePersonaChange(persona.id)}
+                                            className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-200 ${
+                                                activePersona === persona.id 
+                                                ? 'bg-blue-500/10 border-blue-500 text-blue-500 scale-105' 
+                                                : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300')
+                                            }`}
+                                        >
+                                            <span className="text-lg mb-1">{persona.icon}</span>
+                                            <span className="text-[9px] font-bold text-center leading-tight">{persona.name}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Sliders */}
+                            <div className={`space-y-4 transition-opacity duration-300 ${activePersona !== 'custom' ? 'opacity-70 grayscale-[0.5]' : ''}`}>
+                                <Slider label="💰 Affordability" value={weights.rent} onChange={(v) => setWeights({...weights, rent: v})} disabled={activePersona !== 'custom'} isDark={isDark} />
+                                <Slider label="🛡️ Safety Index" value={weights.safety} onChange={(v) => setWeights({...weights, safety: v})} disabled={activePersona !== 'custom'} isDark={isDark} />
+                                <Slider label="🎉 Lifestyle & Fun" value={weights.fun} onChange={(v) => setWeights({...weights, fun: v})} disabled={activePersona !== 'custom'} isDark={isDark} />
+                                <Slider label="🚗 Commute Priority" value={weights.commute} onChange={(v) => setWeights({...weights, commute: v})} disabled={activePersona !== 'custom'} isDark={isDark} />
+                            </div>
+
+                            {/* Results */}
+                            <div>
+                                <h2 className="text-xs font-bold opacity-60 uppercase tracking-wider mb-3">Recommendations</h2>
+                                {sortedCities.length > 0 && <AIInsight city={sortedCities[0]} weights={weights} trafficImpact={isPeakHour} apiKey={userApiKey} />}
+                                
+                                <div className="space-y-3">
+                                    {sortedCities.slice(0, 5).map((city, idx) => (
+                                        <div 
+                                            key={city.id}
+                                            onClick={() => setCompareId(city.id === compareId ? null : city.id)}
+                                            className={`group relative flex justify-between items-start p-3 rounded-xl border cursor-pointer transition-all duration-200 hover:shadow-md ${
+                                                city.id === compareId 
+                                                ? 'border-purple-500 bg-purple-500/5' 
+                                                : (idx === 0 ? (isDark ? 'bg-slate-800 border-green-900 shadow-sm' : 'bg-white border-green-200 shadow-sm') : (isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'))
+                                            }`}
+                                        >
+                                            {idx === 0 && <div className="absolute -left-1 -top-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow-sm">1</div>}
+
+                                            <div className="flex-1 pl-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="font-bold text-sm">{city.name}</div>
+                                                    {idx === 0 && <span className="text-green-500"><Icons.Check /></span>}
+                                                </div>
+                                                
+                                                {/* Connectivity Index */}
+                                                <div className="flex gap-2 text-[10px] opacity-60 mt-1 mb-2">
+                                                    <span className="flex items-center gap-1"><Icons.Plane /> {city.distToAirport}km</span>
+                                                    <span className="flex items-center gap-1"><span className="text-lg leading-none">🚇</span> {city.distToMetro}km</span>
+                                                </div>
+
+                                                <div className="flex gap-1 mt-1 flex-wrap">
+                                                    {city.commuteScore > 80 && <span className="text-[9px] px-2 py-0.5 rounded-full border border-blue-200 bg-blue-100 text-blue-700">🚗 Close</span>}
+                                                    {city.scores.investment > 85 && <span className="text-[9px] px-2 py-0.5 rounded-full border border-purple-200 bg-purple-100 text-purple-700">📈 High ROI</span>}
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="text-right pl-3 border-l border-opacity-10 border-slate-500 flex flex-col items-end gap-1">
+                                                <div className="text-lg font-black tracking-tight" style={{ color: getColor(city.finalScore) }}>
+                                                    {city.finalScore}%
+                                                </div>
+                                                <div className="flex gap-1">
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); setDiningCity(city); }}
+                                                        className={`text-[9px] px-2 py-0.5 rounded font-bold transition flex items-center gap-1 ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-orange-400' : 'bg-orange-50 hover:bg-orange-100 text-orange-600 border border-orange-200'}`}
+                                                        title="Best Food"
+                                                    >
+                                                        <Icons.Utensils />
+                                                    </button>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); setDayPlanCity(city); }}
+                                                        className={`text-[9px] px-2 py-0.5 rounded font-bold transition flex items-center gap-1 ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-purple-400' : 'bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-200'}`}
+                                                        title="Day in the Life"
+                                                    >
+                                                        <Icons.Calendar />
+                                                    </button>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); setChatCity(city); }}
+                                                        className={`p-1 rounded font-bold transition ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+                                                    >
+                                                        <Icons.Chat />
+                                                    </button>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); setInvestmentCity(city); }}
+                                                        className={`text-[9px] px-2 py-0.5 rounded font-bold transition flex items-center gap-1 ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+                                                    >
+                                                        <Icons.Trending /> ROI
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            
+                            {/* Comparison Chart */}
+                            {sortedCities.length > 0 && (
+                                <div className="pt-2">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h2 className="text-xs font-bold opacity-60 uppercase tracking-wider">Metric Breakdown</h2>
+                                        {compareId && <button onClick={() => setCompareId(null)} className="text-[10px] text-red-500 hover:underline font-bold">Close Comparison</button>}
+                                    </div>
+                                    <ComparisonInsight cityA={sortedCities[0]} cityB={comparisonCity} apiKey={userApiKey} isDark={isDark} />
+                                    <RadarChartComponent cityA={sortedCities[0]} cityB={comparisonCity} isDark={isDark} />
+                                </div>
+                            )}
+
+                        </div>
+                        
+                        {/* Footer */}
+                        <div className={`p-4 border-t text-xs text-center opacity-60 ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                            <button onClick={() => setShowAbout(true)} className="hover:underline flex items-center justify-center gap-1 w-full">
+                                Built with <span className="text-red-500">♥</span> by [Your Name]
+                            </button>
+                            <button onClick={generateReport} className="mt-2 text-[10px] font-bold text-blue-500 hover:underline flex items-center justify-center gap-1 w-full">
+                                <Icons.Download /> Download Report
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* MAP CONTAINER */}
+                    <div className="flex-1 relative bg-slate-200 dark:bg-slate-900">
+                        <div id="map-container" className="h-full w-full outline-none"></div>
+                        
+                        <div className={`absolute top-5 right-5 backdrop-blur shadow-lg p-3 rounded-lg z-[1000] text-xs border ${isDark ? 'bg-slate-900/90 border-slate-700 text-white' : 'bg-white/90 border-slate-200 text-slate-600'}`}>
+                            <div className="font-bold mb-2 opacity-70 uppercase tracking-wider text-[10px]">Map Legend</div>
+                            <div className="flex items-center gap-2 mb-1.5"><div className="w-3 h-3 rounded-full bg-blue-600 border border-white shadow-sm"></div> Work Hub</div>
+                            <div className="flex items-center gap-2 mb-1.5"><div className="w-3 h-3 rounded-full bg-green-500 border border-white shadow-sm"></div> Top Match</div>
+                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-amber-500 border border-white opacity-60"></div> Other Options</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
